@@ -11,3 +11,14 @@ This works atleast on :
   * YB1-X91L
 
 We write it in C so it will be very efficent because it runs once a second all the time.
+
+# Install
+
+You have to have the xrandr and xinput2 extensions to X11
+
+So for debian you should:
+
+    apt-get install build-essential libxrandr-dev libxi-dev
+
+To build, just run make
+And execute, on startup maybe, in your X11 session.
