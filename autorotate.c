@@ -288,7 +288,7 @@ int main(int argc, char *argv[]) {
         if (inclinatie < -180) inclinatie += 360;
         Formatie coinc = alon > 80 && alon < 100 ? nedefinitit :
             inclinatie > -170 && inclinatie < -10 ? laptop :
-            inclinatie < 170 && inclinatie > 10 ? tableta : laLimita;
+            inclinatie > 10 || inclinatie <= -170 ? tableta : laLimita;
         if (report) {
             char const *cpoz[] = {"oriz", "sus", "jos", "stanga", "dreapta"};
             char const *ccoinc[] = {"lap", "tab", "undef", "bor"};
