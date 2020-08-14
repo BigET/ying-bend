@@ -108,7 +108,8 @@ int rotateScreen(Orientare orientation, Formatie form) {
     for (int u = 0; u < 9; ++u) data.vals[u] = v[u];
     XIDeviceInfo *devs = XIQueryDevice(disp, XIAllDevices, &iscres);
     for (int i = 0; i < iscres; ++i) {
-        int isVK = !strcmp("virtual-keyboard", devs[i].name);
+        int isVK = !strcmp("virtual-keyboard", devs[i].name) ||
+                !strcmp("virtual-touchpad", devs[i].name);
         int isTouch = doRotation && (!strcmp("HDP0001:00 2ABB:8102", devs[i].name)
                 || !strncmp("Wacom HID 169 Pen ", devs[i].name, 18));
         if (!isVK && !isTouch) continue;
