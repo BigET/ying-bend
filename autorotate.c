@@ -143,12 +143,22 @@ int rotateScreen(Display *disp, Orientation targetRR) {
     modifyProperty(disp, padDevice, "Coordinate Transformation Matrix", v, 9);
 }
 
-void activateKeyboard(Display *disp, int activateKeyboard) {
-    char const *vkDevices[] = {"virtual-keyboard", "virtual-touchpad", ""};
-    modifyProperty(disp, vkDevices, "Device Enabled", &activateKeyboard, 1);
+void setKBBL(double blVal) {
+    FILE *fl = fopen("/sys/class/pwm/pwmchip1/pwm0/duty_cycle", "w");
+    printf("backlight=%.0f\n", blVal);
+    if (fl) {
+        fprintf(fl, "%.0f", blVal);
+        fclose(fl);
+    }
 }
 
-#define maxName sizeof("/sys/bus/iio/devices/iio:device99999999/in_accel_x_raw")
+void activateKeyboard(Display *disp, int actKey, double backlightValue) {
+    char const *vkDevices[] = {"virtual-keyboard", "virtual-touchpad", ""};
+    modifyProperty(disp, vkDevices, "Device Enabled", &actKey, 1);
+    setKBBL(actKey ? backlightValue : 0);
+}
+
+#define maxName sizeof("/sys/bus/iio/devices/iio:device999999999999999/in_accel_x_raw")
 #define maxDevs 4
 
 char rawValsFileNames[maxDevs][3][maxName];
@@ -182,6 +192,46 @@ void init_accels() {
     }
 }
 
+#define maxAls 2
+char alsRawIllumination[maxAls][maxName];
+double alsData[maxAls] = {0.0, 0.0};
+double backlightMax = 0.0;
+double pwmMax = 0.0;
+
+void init_als() {
+    int devNrs[maxAls];
+    char devName[PATH_MAX];
+    int curDev = 0;
+    for (int i = 0; i < 20 && curDev < maxAls; ++i) {
+        if (PATH_MAX <= snprintf(devName, PATH_MAX,
+                    "/sys/bus/iio/devices/iio:device%d/in_illuminance_raw", i)) {
+            perror("init_als MAXPATHLEN not enough");
+            exit(12);
+        }
+        FILE *fl = fopen(devName, "r");
+        if (!fl) continue;
+        devNrs[curDev++] = i;
+        fclose(fl);
+    }
+    if (curDev != maxAls) {
+        perror("not found all devices.");
+        exit(13);
+    }
+    for (int i = 0; i < maxAls; ++i)
+        snprintf(alsRawIllumination[i], maxName,
+                "/sys/bus/iio/devices/iio:device%d/in_illuminance_raw", devNrs[i]);
+    backlightMax = readFloat("/sys/class/backlight/intel_backlight/max_brightness");
+    if (backlightMax == 0.0) {
+        perror("cannot read backlight max value.");
+        exit(14);
+    }
+    pwmMax = readFloat("/sys/class/pwm/pwmchip1/pwm0/period");
+    if (pwmMax == 0.0) {
+        perror("cannot read keyboard backlight max value.");
+        exit(15);
+    }
+}
+
 typedef struct Cartezian {double x, y, z;} Cartezian;
 typedef struct Polar{double alt, lat, lon;} Polar;
 
@@ -204,7 +254,7 @@ union {
 } data;
 
 int read_accels() {
-    for (int i = 0; i < 4; ++i) for (int j = 0; j < 3; ++j)
+    for (int i = 0; i < maxDevs; ++i) for (int j = 0; j < 3; ++j)
         data.raw_vals[i][j] = readFloat(rawValsFileNames[i][j]);
     int badData = 0;
     if (DEBUG) {
@@ -220,6 +270,12 @@ int read_accels() {
         }
     if (DEBUG) printf(badData ? "naspa\n" : "bun\n");
     return badData;
+}
+
+int read_als() {
+    for (int i = 0; i < maxAls; ++i) alsData[i] = readFloat(alsRawIllumination[i]);
+    if (fabs(alsData[0] - alsData[1]) > 2000) return 1;
+    return 0;
 }
 
 void calculateAverage() {
@@ -262,14 +318,17 @@ Formfactor lastFF = undefinedFF;
 int main(int argc, char *argv[]) {
     if (argc > 1 && !strcmp("-q", argv[1])) doRporting = 0;
     init_accels();
+    init_als();
     for (;;) {
         sleep(1);
-        if (read_accels()) continue;
+        if (read_accels() || read_als()) continue;
         calculateAverage();
         rotate_keyboard_with_90_deg_over_z();
         convertToPolar();
         Orientation newOrient = getOrientation();
         Formfactor newFF = getFormfactor();
+        if (alsData[0] > 2000000) alsData[0] = 2000000;
+        double backlight = (sqrt(alsData[0] / 20000000.0) * 0.85 + 0.15);
         if (doRporting) {
             char const *cpoz = "";
             switch (newOrient) {
@@ -280,7 +339,7 @@ int main(int argc, char *argv[]) {
             case rightward: cpoz = "rightward"; break;
             }
             char const *ccoinc[] = {"lap", "tab", "undef", "bor"};
-            printf("%10.0f%8.2f%8.2f%10s%10.0f%8.2f%8.2f%6s\n",
+            printf("%10.0f%8.2f%8.2f%10s%10.0f%8.2f%8.2f%6s %3.0f\n",
                 data.calculat.pol.screen.alt,
                 data.calculat.pol.screen.lat,
                 data.calculat.pol.screen.lon,
@@ -288,14 +347,21 @@ int main(int argc, char *argv[]) {
                 data.calculat.pol.keyboard.alt,
                 data.calculat.pol.keyboard.lat,
                 data.calculat.pol.keyboard.lon,
-                ccoinc[newFF]);
+                ccoinc[newFF], backlight * 100);
         }
         Display *disp = XOpenDisplay(NULL);
         if (!disp) continue;
         if (newOrient != horizontal && newOrient != lastOrient)
             rotateScreen(disp, lastOrient = newOrient);
         if (newFF != undefinedFF && newFF != borderFF && newFF != lastFF)
-            activateKeyboard(disp, laptop == (lastFF = newFF));
+            activateKeyboard(disp, laptop == (lastFF = newFF), backlight * pwmMax);
+        FILE *fl = fopen("/sys/class/backlight/intel_backlight/brightness", "w");
+        if (fl) {
+            fprintf(fl, "%.0f", backlight * backlightMax);
+            fclose(fl);
+        }
+        if ( 0.0 != readFloat("/sys/class/pwm/pwmchip1/pwm0/duty_cycle"))
+            setKBBL(backlight * pwmMax);
         XCloseDisplay(disp);
     }
 }
