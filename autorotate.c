@@ -29,12 +29,12 @@ float const stangam[9] = {-1, 0, 1, 0, -1, 1, 0, 0, 1};
 float const dreaptam[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 
 double readFloat(const char* fn) {
-    FILE*fl = fopen(fn, "r");
-    double rez = 0;
-    if (fl) {
+    double rez = 0.0;
+    FILE*fl;
+    if (fl = fopen(fn, "r")) {
         fscanf(fl, "%lf", &rez);
+        fclose(fl);
     }
-    fclose(fl);
     return rez;
 }
 
