@@ -175,55 +175,33 @@ int nrCmp(void const *a, void const *b) {
     return ia[0] - ib[0];
 }
 
-int init_names() {
-    char const rootDir[] = "/sys/bus/iio/devices";
-    DIR *iioRoot = opendir(rootDir);
-    struct dirent * devDE;
+void init_accels() {
     int devNrs[maxDevs];
-    int curDev = 0, curAxis = 0;
-    if (!iioRoot) {
-        perror("cannot access iio root");
-        return 1;
-    }
-    while (devDE = readdir(iioRoot)) {
-        int dNr, convChNr;
-        int convNr = sscanf(devDE->d_name, "iio:device%u%n", &dNr, &convChNr);
-        if (convNr != 1 || strlen(devDE->d_name) != convChNr) continue;
-        char devDir[] = "/sys/bus/iio/devices/iio:device99999999";
-        strcpy(devDir + sizeof(rootDir), devDE->d_name);
-        DIR *dev = opendir(devDir);
-        if (!dev) {
-            fprintf(stderr, "cannot open dir: %s", devDir);
-            perror(0);
-            return 2;
+    char devName[PATH_MAX];
+    int curDev = 0;
+    for (int i = 0; i < 20 && curDev < maxDevs; ++i) {
+        if (PATH_MAX <= snprintf(devName, PATH_MAX,
+                    "/sys/bus/iio/devices/iio:device%d/in_accel_x_raw", i)) {
+            perror("init_accels MAXPATHLEN not enough");
+            exit(10);
         }
-        int foundRaw = 0;
-        struct dirent * axisDE;
-        while (axisDE = readdir(dev)) {
-            if (strcmp("in_accel_x_raw", axisDE->d_name)) continue;
-            foundRaw = 1;
-            break;
-        }
-        closedir(dev);
-        if (foundRaw) devNrs[curDev++] = dNr;
-        if (curDev >= maxDevs) break;
+        FILE *fl = fopen(devName, "r");
+        if (!fl) continue;
+        devName[curDev++] = i;
+        fclose(fl);
     }
-    closedir(iioRoot);
-    qsort(devNrs, curDev, sizeof(devNrs[0]), nrCmp);
-    for (int i = 0; i < curDev; ++ i) {
-            snprintf(rawValsFileNames[i][0], maxName,
-                    "/sys/bus/iio/devices/iio:device%d/in_accel_x_raw",
-                    devNrs[i]);
-            snprintf(rawValsFileNames[i][1], maxName,
-                    "/sys/bus/iio/devices/iio:device%d/in_accel_y_raw",
-                    devNrs[i]);
-            snprintf(rawValsFileNames[i][2], maxName,
-                    "/sys/bus/iio/devices/iio:device%d/in_accel_z_raw",
-                    devNrs[i]);
+    if (curDev != maxDevs) {
+        perror("not found all devices.");
+        exit(11);
     }
-    if (DEBUG) for (int i = 0; i < curDev; ++i) for (int j = 0; j < 3; ++j)
-        printf("file=>%s\n", rawValsFileNames[i][j]);
-    return 0;
+    for (int i = 0; i < maxDevs; ++ i) {
+        snprintf(rawValsFileNames[i][0], maxName,
+                "/sys/bus/iio/devices/iio:device%d/in_accel_x_raw", devNrs[i]);
+        snprintf(rawValsFileNames[i][1], maxName,
+                "/sys/bus/iio/devices/iio:device%d/in_accel_y_raw", devNrs[i]);
+        snprintf(rawValsFileNames[i][2], maxName,
+                "/sys/bus/iio/devices/iio:device%d/in_accel_z_raw", devNrs[i]);
+    }
 }
 
 typedef struct Cartezian {double x, y, z;} Cartezian;
@@ -241,7 +219,7 @@ int main(int argc, char *argv[]) {
     int rez;
     int report = 1;
     if (argc > 1 && !strcmp("-q", argv[1])) report = 0;
-    if (rez = init_names()) return rez;
+    init_accels();
     for (;;) {
         sleep(1);
         union {
