@@ -11,8 +11,10 @@
 
 #define DEBUG 0
 
-typedef enum Orientare {orizontal, sus, jos, stanga, dreapta} Orientare;
-typedef enum Formatie {laptop, tableta, nedefinitit, laLimita} Formatie;
+typedef enum Orientation {horizontal = 0,
+    upward = RR_Rotate_270, downward = RR_Rotate_90,
+    leftward = RR_Rotate_180, rightward = RR_Rotate_0} Orientation;
+typedef enum Formfactor {laptop, tablet, undefinedFF, borderFF} Formfactor;
 
 int needSwapDims(int curR, int targR) {
     if (curR == RR_Rotate_90 || curR == RR_Rotate_270) {
@@ -38,15 +40,8 @@ double readFloat(const char* fn) {
     return rez;
 }
 
-int rotateScreen(Orientare orientation, Formatie form) {
-    int targetRR;
-    switch (orientation) {
-    case sus: targetRR = RR_Rotate_270; break;
-    case jos: targetRR = RR_Rotate_90; break;
-    case stanga: targetRR = RR_Rotate_180; break;
-    case dreapta: targetRR = RR_Rotate_0; break;
-    default: return 0;
-    }
+int rotateScreen(Orientation targetRR, Formfactor form) {
+    if (!targetRR) return 0;
 
     Display *disp;
     XRRScreenResources *screen;
@@ -99,11 +94,11 @@ int rotateScreen(Orientare orientation, Formatie form) {
         float vals[9];
         char raw[sizeof(float) * 9];
     } data;
-    switch (orientation) {
-    case sus: v = susm; break;
-    case jos: v = josm; break;
-    case stanga: v = stangam; break;
-    case dreapta: v = dreaptam; break;
+    switch (targetRR) {
+    case upward: v = susm; break;
+    case downward: v = josm; break;
+    case leftward: v = stangam; break;
+    case rightward: v = dreaptam; break;
     }
     for (int u = 0; u < 9; ++u) data.vals[u] = v[u];
     XIDeviceInfo *devs = XIQueryDevice(disp, XIAllDevices, &iscres);
@@ -133,7 +128,7 @@ int rotateScreen(Orientare orientation, Formatie form) {
                 }
                 if (isVK) {
                     if (DEBUG) printf("form=%d, orig= %d\n", form, buf[0]);
-                    if (form == laptop && buf[0] == 0 || form == tableta && buf[0] != 0) {
+                    if (form == laptop && buf[0] == 0 || form == tablet && buf[0] != 0) {
                         double duty_cycle = readFloat("/sys/class/pwm/pwmchip1/pwm0/period") / 2.0;
                         int duty_cycleI = lrint(duty_cycle);
                         if (DEBUG) printf("set prop from %d to %d, duty_cycle=%d\n", buf[0], form == laptop, duty_cycleI);
@@ -255,20 +250,20 @@ int main(int argc, char *argv[]) {
         cart2pol(&data.calculat.cart.ecran, &data.calculat.pol.ecran);
         cart2pol(&data.calculat.cart.tastatura, &data.calculat.pol.tastatura);
         double alon = fabs(data.calculat.pol.ecran.lon);
-        Orientare poz = data.calculat.pol.ecran.lat > 70 || data.calculat.pol.ecran.lat < -70 ? orizontal :
-            alon > 135 ? sus : alon < 45 ? jos :
-            data.calculat.pol.ecran.lon < 0 ? dreapta : stanga;
+        Orientation poz = data.calculat.pol.ecran.lat > 70 || data.calculat.pol.ecran.lat < -70 ? horizontal :
+            alon > 135 ? upward : alon < 45 ? downward :
+            data.calculat.pol.ecran.lon < 0 ? rightward : leftward;
         double inclinatie = (atan2(data.calculat.cart.ecran.z, data.calculat.cart.ecran.x) -
             atan2(data.calculat.cart.tastatura.z, data.calculat.cart.tastatura.x)) * 180.0 / PI;
         if (inclinatie > 180) inclinatie -= 360;
         if (inclinatie < -180) inclinatie += 360;
-        Formatie coinc = alon > 80 && alon < 100 ? nedefinitit :
+        Formfactor coinc = alon > 80 && alon < 100 ? undefinedFF :
             inclinatie > -170 && inclinatie < -10 ? laptop :
-            inclinatie > 10 || inclinatie <= -170 ? tableta : laLimita;
+            inclinatie > 10 || inclinatie <= -170 ? tablet : borderFF;
         if (report) {
-            char const *cpoz[] = {"oriz", "sus", "jos", "stanga", "dreapta"};
+            char const *cpoz[] = {"horiz", "upward", "downward", "leftward", "rightward"};
             char const *ccoinc[] = {"lap", "tab", "undef", "bor"};
-            printf("%10.0f%8.2f%8.2f%9s%10.0f%8.2f%8.2f%6s\n",
+            printf("%10.0f%8.2f%8.2f%10s%10.0f%8.2f%8.2f%6s\n",
                 data.calculat.pol.ecran.alt,
                 data.calculat.pol.ecran.lat,
                 data.calculat.pol.ecran.lon,
