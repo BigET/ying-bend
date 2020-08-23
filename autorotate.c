@@ -205,10 +205,10 @@ void cart2pol(const Cartezian *cart, Polar *pol) {
     pol->lon = atan2(cart->y, cart->x) * 180.0 / PI;
 }
 
+int doRporting = 1;
+
 int main(int argc, char *argv[]) {
-    int rez;
-    int report = 1;
-    if (argc > 1 && !strcmp("-q", argv[1])) report = 0;
+    if (argc > 1 && !strcmp("-q", argv[1])) doRporting = 0;
     init_accels();
     for (;;) {
         sleep(1);
@@ -260,8 +260,15 @@ int main(int argc, char *argv[]) {
         Formfactor coinc = alon > 80 && alon < 100 ? undefinedFF :
             inclinatie > -170 && inclinatie < -10 ? laptop :
             inclinatie > 10 || inclinatie <= -170 ? tablet : borderFF;
-        if (report) {
-            char const *cpoz[] = {"horiz", "upward", "downward", "leftward", "rightward"};
+        if (doRporting) {
+            char const *cpoz = "";
+            switch (poz) {
+            case horizontal: cpoz = "horiz"; break;
+            case upward: cpoz = "upward"; break;
+            case downward: cpoz = "downward"; break;
+            case leftward: cpoz = "leftward"; break;
+            case rightward: cpoz = "rightward"; break;
+            }
             char const *ccoinc[] = {"lap", "tab", "undef", "bor"};
             printf("%10.0f%8.2f%8.2f%10s%10.0f%8.2f%8.2f%6s\n",
                 data.calculat.pol.ecran.alt,
