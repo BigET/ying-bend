@@ -207,59 +207,72 @@ void cart2pol(const Cartezian *cart, Polar *pol) {
 
 int doRporting = 1;
 
+union {
+    double raw_vals[maxDevs][3];
+    struct {
+        struct { Cartezian ecran, tastatura; } primar, secundar;
+    } senzori_bruti;
+    struct {
+        struct { Cartezian ecran, tastatura; } cart;
+        struct { Polar ecran, tastatura; } pol;
+    } calculat;
+} data;
+
+int read_accels() {
+    for (int i = 0; i < 4; ++i) for (int j = 0; j < 3; ++j)
+        data.raw_vals[i][j] = readFloat(rawValsFileNames[i][j]);
+    int badData = 0;
+    if (DEBUG) {
+        printf("rawData:");
+        for (int i = 0; i < 4; ++i) for (int j = 0; j < 3; ++j)
+            printf("  %g", data.raw_vals[i][j]);
+        printf("\n");
+    }
+    for (int i = 0; i < 2; ++i) for (int j = 0; j < 3; ++j)
+        if (fabs(data.raw_vals[i][j] - data.raw_vals[i + 2][j]) > 100000.0) {
+            if (DEBUG) printf ("%f %f\n", data.raw_vals[i][j], data.raw_vals[i + 1][j]);
+            badData = 1;
+        }
+    if (DEBUG) printf(badData ? "naspa\n" : "bun\n");
+    return badData;
+}
+
+void calculateAverage() {
+    for (int i = 0; i < 2; ++i) for (int j = 0; j < 3; ++j)
+        data.raw_vals[i][j] = (data.raw_vals[i][j] + data.raw_vals[i + 2][j]) / 2.0;
+}
+
+void rotate_keyboard_with_90_deg_over_z() {
+    double temp = data.calculat.cart.tastatura.x;
+    data.calculat.cart.tastatura.x = data.calculat.cart.tastatura.y;
+    data.calculat.cart.tastatura.y = 0.0 - temp;
+}
+
+void convertToPolar() {
+    cart2pol(&data.calculat.cart.ecran, &data.calculat.pol.ecran);
+    cart2pol(&data.calculat.cart.tastatura, &data.calculat.pol.tastatura);
+}
+
 int main(int argc, char *argv[]) {
     if (argc > 1 && !strcmp("-q", argv[1])) doRporting = 0;
     init_accels();
     for (;;) {
         sleep(1);
-        union {
-            double val[maxDevs][3];
-            struct {
-                struct { Cartezian ecran, tastatura; } primar, secundar;
-            } senzori_bruti;
-            struct {
-                struct { Cartezian ecran, tastatura; } cart;
-                struct { Polar ecran, tastatura; } pol;
-            } calculat;
-        } data;
-        for (int i = 0; i < 4; ++i) for (int j = 0; j < 3; ++j)
-            data.val[i][j] = readFloat(rawValsFileNames[i][j]);
-        int badData = 0;
-        if (DEBUG) {
-            printf("rawData:");
-            for (int i = 0; i < 4; ++i) for (int j = 0; j < 3; ++j)
-                printf("  %g", data.val[i][j]);
-            printf("\n");
-        }
-        for (int i = 0; i < 2; ++i) for (int j = 0; j < 3; ++j)
-            if (fabs(data.val[i][j] - data.val[i + 2][j]) > 100000.0) {
-                if (DEBUG) printf ("%f %f\n", data.val[i][j], data.val[i + 1][j]);
-                badData = 1;
-            }
-        if (DEBUG) printf(badData ? "naspa\n" : "bun\n");
-        if (badData) continue;
-        // se calculeaza media aritmetica intre senzorii primari si secundari.
-        for (int i = 0; i < 2; ++i) for (int j = 0; j < 3; ++j)
-            data.val[i][j] = (data.val[i][j] + data.val[i + 2][j]) / 2.0;
-        // se roteste tastatura cu 90 grale pe axa z.
-        {
-            double temp = data.calculat.cart.tastatura.x;
-            data.calculat.cart.tastatura.x = data.calculat.cart.tastatura.y;
-            data.calculat.cart.tastatura.y = 0.0 - temp;
-        }
-        cart2pol(&data.calculat.cart.ecran, &data.calculat.pol.ecran);
-        cart2pol(&data.calculat.cart.tastatura, &data.calculat.pol.tastatura);
+        if (read_accels()) continue;
+        calculateAverage();
+        rotate_keyboard_with_90_deg_over_z();
+        convertToPolar();
         double alon = fabs(data.calculat.pol.ecran.lon);
         Orientation poz = data.calculat.pol.ecran.lat > 70 || data.calculat.pol.ecran.lat < -70 ? horizontal :
             alon > 135 ? upward : alon < 45 ? downward :
             data.calculat.pol.ecran.lon < 0 ? rightward : leftward;
-        double inclinatie = (atan2(data.calculat.cart.ecran.z, data.calculat.cart.ecran.x) -
+        double relativeTilt = (atan2(data.calculat.cart.ecran.z, data.calculat.cart.ecran.x) -
             atan2(data.calculat.cart.tastatura.z, data.calculat.cart.tastatura.x)) * 180.0 / PI;
-        if (inclinatie > 180) inclinatie -= 360;
-        if (inclinatie < -180) inclinatie += 360;
+        if (relativeTilt > 180) relativeTilt -= 360;
+        if (relativeTilt < -180) relativeTilt += 360;
         Formfactor coinc = alon > 80 && alon < 100 ? undefinedFF :
-            inclinatie > -170 && inclinatie < -10 ? laptop :
-            inclinatie > 10 || inclinatie <= -170 ? tablet : borderFF;
+            relativeTilt > -170 && relativeTilt < -10 ? laptop :
+            relativeTilt > 10 || relativeTilt <= -170 ? tablet : borderFF;
         if (doRporting) {
             char const *cpoz = "";
             switch (poz) {
