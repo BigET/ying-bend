@@ -32,8 +32,8 @@ void modifyProperty(Display *disp, char const *devices[], char *property_name, v
     for (int i = 0; i < devCount; ++i) {
         {
             int devNotFound = 1;
-            for (char const *devName = devices[0]; devName[0] && devNotFound; ++devName)
-                devNotFound = strncmp(devName, devs[i].name, strlen(devName));
+            for (int j = 0; devices[j][0] && devNotFound; ++j)
+                devNotFound = strncmp(devices[j], devs[i].name, strlen(devices[j]));
             if (devNotFound) continue;
         }
         int propCount;
@@ -52,12 +52,11 @@ void modifyProperty(Display *disp, char const *devices[], char *property_name, v
             unsigned char *buf;
             if (Success != XIGetProperty(disp, devs[i].deviceid, props[j],
                         0, 0, False, AnyPropertyType,
-                        &ptype, &pformat, &icount, &ba, &buf)) {
-                XIChangeProperty(disp, devs[i].deviceid, props[j],
-                        ptype, pformat, PropModeReplace, content, 9);
-                XSync(disp, False);
-                XFree(buf);
-            }
+                        &ptype, &pformat, &icount, &ba, &buf)) continue;
+            XIChangeProperty(disp, devs[i].deviceid, props[j],
+                    ptype, pformat, PropModeReplace, content, count);
+            XSync(disp, False);
+            XFree(buf);
         }
         XFree (props);
     }
