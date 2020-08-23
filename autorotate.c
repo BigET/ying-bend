@@ -170,11 +170,6 @@ int rotateScreen(Orientare orientation, Formatie form) {
 
 char rawValsFileNames[maxDevs][3][maxName];
 
-int nrCmp(void const *a, void const *b) {
-    int const *ia = (int const *)a, *ib = (int const *)b;
-    return ia[0] - ib[0];
-}
-
 void init_accels() {
     int devNrs[maxDevs];
     char devName[PATH_MAX];
