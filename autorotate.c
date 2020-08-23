@@ -115,10 +115,12 @@ int rotateScreen(Orientare orientation, Formatie form) {
         if (!isVK && !isTouch) continue;
         Atom* props = XIListProperties(disp, devs[i].deviceid, &icrtc);
         for (int j = 0; j < icrtc; ++j) {
-            if (isTouch && strcmp("Coordinate Transformation Matrix", XGetAtomName(disp, props[j])))
+            char * propName = XGetAtomName(disp, props[j]);
+            if (isTouch && strcmp("Coordinate Transformation Matrix", propName) ||
+                    isVK && strcmp("Device Enabled", propName)) {
+                XFree(propName);
                 continue;
-            if (isVK && strcmp("Device Enabled", XGetAtomName(disp, props[j])))
-                continue;
+            }
             Atom ptype;
             int pformat;
             unsigned long int icount, ba;
@@ -127,7 +129,7 @@ int rotateScreen(Orientare orientation, Formatie form) {
                 if (DEBUG) {
                     printf("dbg:type=%d, format=%d, ba=%d, icount=%d, val=%d\n",
                         ptype, pformat, ba, icount, buf[0]);
-                    printf("pn=%s, isVK=%d\n", XGetAtomName(disp, props[j]), isVK);
+                    printf("pn=%s, isVK=%d\n", propName, isVK);
                 }
                 if (isVK) {
                     if (DEBUG) printf("form=%d, orig= %d\n", form, buf[0]);
@@ -154,6 +156,7 @@ int rotateScreen(Orientare orientation, Formatie form) {
                 XSync(disp, False);
                 XFree(buf);
             }
+            XFree(propName);
         }
         XFree (props);
     }
