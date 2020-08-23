@@ -133,6 +133,14 @@ int rotateScreen(Display *disp, Orientation targetRR) {
     }
     char const *tDevices[] = {"HDP0001:00 2ABB:8102", "Wacom HID 169 Pen ", ""};
     modifyProperty(disp, tDevices, "Coordinate Transformation Matrix", v, 9);
+    switch (targetRR) {
+    case upward: v = (void *)rightMatrix; break;
+    case downward: v = (void *)leftMatrix; break;
+    case leftward: v = (void *)upMatrix; break;
+    case rightward: v = (void *)downMatrix; break;
+    }
+    char const *padDevice[] = {"virtual-touchpad", ""};
+    modifyProperty(disp, padDevice, "Coordinate Transformation Matrix", v, 9);
 }
 
 void activateKeyboard(Display *disp, int activateKeyboard) {
