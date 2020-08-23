@@ -25,10 +25,49 @@ int needSwapDims(int curR, int targR) {
     return 0;
 }
 
-float const susm[9] = {0, 1, 0, -1, 0, 1, 0, 0, 1};
-float const josm[9] = {0, -1, 1, 1, 0, 0, 0, 0, 1};
-float const stangam[9] = {-1, 0, 1, 0, -1, 1, 0, 0, 1};
-float const dreaptam[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+void modifyProperty(Display *disp, char const *devices[], char *property_name, void* content, int count) {
+    int devCount = 0;
+    XIDeviceInfo *devs = XIQueryDevice(disp, XIAllDevices, &devCount);
+    if (!devs) return;
+    for (int i = 0; i < devCount; ++i) {
+        {
+            int devNotFound = 1;
+            for (char const *devName = devices[0]; devName[0] && devNotFound; ++devName)
+                devNotFound = strncmp(devName, devs[i].name, strlen(devName));
+            if (devNotFound) continue;
+        }
+        int propCount;
+        Atom* props = XIListProperties(disp, devs[i].deviceid, &propCount);
+        if (!props) continue;
+        for (int j = 0; j < propCount; ++j) {
+            {
+                char * propName = XGetAtomName(disp, props[j]);
+                int notFound = strcmp(property_name, propName);
+                XFree(propName);
+                if (notFound) continue;
+            }
+            Atom ptype;
+            int pformat;
+            unsigned long int icount, ba;
+            unsigned char *buf;
+            if (Success != XIGetProperty(disp, devs[i].deviceid, props[j],
+                        0, 0, False, AnyPropertyType,
+                        &ptype, &pformat, &icount, &ba, &buf)) {
+                XIChangeProperty(disp, devs[i].deviceid, props[j],
+                        ptype, pformat, PropModeReplace, content, 9);
+                XSync(disp, False);
+                XFree(buf);
+            }
+        }
+        XFree (props);
+    }
+    XIFreeDeviceInfo(devs);
+}
+
+float const upMatrix[9] = {0, 1, 0, -1, 0, 1, 0, 0, 1};
+float const downMatrix[9] = {0, -1, 1, 1, 0, 0, 0, 0, 1};
+float const leftMatrix[9] = {-1, 0, 1, 0, -1, 1, 0, 0, 1};
+float const rightMatrix[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
 
 double readFloat(const char* fn) {
     double rez = 0.0;
@@ -40,10 +79,9 @@ double readFloat(const char* fn) {
     return rez;
 }
 
-int rotateScreen(Orientation targetRR, Formfactor form) {
+int rotateScreen(Display *disp, Orientation targetRR) {
     if (!targetRR) return 0;
 
-    Display *disp;
     XRRScreenResources *screen;
     XRROutputInfo *info;
     XRRCrtcInfo *crtc_info;
@@ -51,7 +89,6 @@ int rotateScreen(Orientation targetRR, Formfactor form) {
     int icrtc;
     int doRotation = 0;
 
-    disp = XOpenDisplay(0);
     screen = XRRGetScreenResources (disp, DefaultRootWindow(disp));
     if (DEBUG) fprintf(stderr, "iscres=%d\n", screen->noutput);
     for (iscres = 0; iscres < screen->noutput; ++iscres) {
@@ -88,76 +125,20 @@ int rotateScreen(Orientation targetRR, Formfactor form) {
         XRRFreeOutputInfo (info);
     }
     XRRFreeScreenResources(screen);
-
-    float const *v;
-    union {
-        float vals[9];
-        char raw[sizeof(float) * 9];
-    } data;
+    void *v;
     switch (targetRR) {
-    case upward: v = susm; break;
-    case downward: v = josm; break;
-    case leftward: v = stangam; break;
-    case rightward: v = dreaptam; break;
+    case upward: v = (void *)upMatrix; break;
+    case downward: v = (void *)downMatrix; break;
+    case leftward: v = (void *)leftMatrix; break;
+    case rightward: v = (void *)rightMatrix; break;
     }
-    for (int u = 0; u < 9; ++u) data.vals[u] = v[u];
-    XIDeviceInfo *devs = XIQueryDevice(disp, XIAllDevices, &iscres);
-    for (int i = 0; i < iscres; ++i) {
-        int isVK = !strcmp("virtual-keyboard", devs[i].name) ||
-                !strcmp("virtual-touchpad", devs[i].name);
-        int isTouch = doRotation && (!strcmp("HDP0001:00 2ABB:8102", devs[i].name)
-                || !strncmp("Wacom HID 169 Pen ", devs[i].name, 18));
-        if (!isVK && !isTouch) continue;
-        Atom* props = XIListProperties(disp, devs[i].deviceid, &icrtc);
-        for (int j = 0; j < icrtc; ++j) {
-            char * propName = XGetAtomName(disp, props[j]);
-            if (isTouch && strcmp("Coordinate Transformation Matrix", propName) ||
-                    isVK && strcmp("Device Enabled", propName)) {
-                XFree(propName);
-                continue;
-            }
-            Atom ptype;
-            int pformat;
-            unsigned long int icount, ba;
-            unsigned char *buf;
-            if (XIGetProperty(disp, devs[i].deviceid, props[j], 0, 36, False, AnyPropertyType, &ptype, &pformat, &icount, &ba, &buf) == Success) {
-                if (DEBUG) {
-                    printf("dbg:type=%d, format=%d, ba=%d, icount=%d, val=%d\n",
-                        ptype, pformat, ba, icount, buf[0]);
-                    printf("pn=%s, isVK=%d\n", propName, isVK);
-                }
-                if (isVK) {
-                    if (DEBUG) printf("form=%d, orig= %d\n", form, buf[0]);
-                    if (form == laptop && buf[0] == 0 || form == tablet && buf[0] != 0) {
-                        double duty_cycle = readFloat("/sys/class/pwm/pwmchip1/pwm0/period") / 2.0;
-                        int duty_cycleI = lrint(duty_cycle);
-                        if (DEBUG) printf("set prop from %d to %d, duty_cycle=%d\n", buf[0], form == laptop, duty_cycleI);
-                        buf[0] = form == laptop;
-                        XIChangeProperty(disp, devs[i].deviceid, props[j], ptype,
-                            pformat, PropModeReplace, buf, 1);
-                        FILE* pwm = fopen("/sys/class/pwm/pwmchip1/pwm0/duty_cycle", "w");
-                        if (pwm) {
-                            fprintf(pwm, "%d", buf[0] ? duty_cycleI : 0);
-                            if (DEBUG) printf("set pwm=%d\n", buf[0] ? duty_cycleI : 0);
-                            fclose(pwm);
-                        } else {
-                            perror ("cannot set led.");
-                        }
-                    }
-                } else {
-                    XIChangeProperty(disp, devs[i].deviceid, props[j], ptype,
-                        pformat, PropModeReplace, data.raw, 9);
-                }
-                XSync(disp, False);
-                XFree(buf);
-            }
-            XFree(propName);
-        }
-        XFree (props);
-    }
-    XIFreeDeviceInfo(devs);
+    char const *tDevices[] = {"HDP0001:00 2ABB:8102", "Wacom HID 169 Pen ", ""};
+    modifyProperty(disp, tDevices, "Coordinate Transformation Matrix", v, 9);
+}
 
-    return XCloseDisplay(disp);
+void activateKeyboard(Display *disp, int activateKeyboard) {
+    char const *vkDevices[] = {"virtual-keyboard", "virtual-touchpad", ""};
+    modifyProperty(disp, vkDevices, "Device Enabled", &activateKeyboard, 1);
 }
 
 #define maxName sizeof("/sys/bus/iio/devices/iio:device99999999/in_accel_x_raw")
@@ -177,7 +158,7 @@ void init_accels() {
         }
         FILE *fl = fopen(devName, "r");
         if (!fl) continue;
-        devName[curDev++] = i;
+        devNrs[curDev++] = i;
         fclose(fl);
     }
     if (curDev != maxDevs) {
@@ -210,11 +191,8 @@ int doRporting = 1;
 union {
     double raw_vals[maxDevs][3];
     struct {
-        struct { Cartezian ecran, tastatura; } primar, secundar;
-    } senzori_bruti;
-    struct {
-        struct { Cartezian ecran, tastatura; } cart;
-        struct { Polar ecran, tastatura; } pol;
+        struct { Cartezian screen, keyboard; } cart;
+        struct { Polar screen, keyboard; } pol;
     } calculat;
 } data;
 
@@ -243,15 +221,36 @@ void calculateAverage() {
 }
 
 void rotate_keyboard_with_90_deg_over_z() {
-    double temp = data.calculat.cart.tastatura.x;
-    data.calculat.cart.tastatura.x = data.calculat.cart.tastatura.y;
-    data.calculat.cart.tastatura.y = 0.0 - temp;
+    double temp = data.calculat.cart.keyboard.x;
+    data.calculat.cart.keyboard.x = data.calculat.cart.keyboard.y;
+    data.calculat.cart.keyboard.y = 0.0 - temp;
 }
 
 void convertToPolar() {
-    cart2pol(&data.calculat.cart.ecran, &data.calculat.pol.ecran);
-    cart2pol(&data.calculat.cart.tastatura, &data.calculat.pol.tastatura);
+    cart2pol(&data.calculat.cart.screen, &data.calculat.pol.screen);
+    cart2pol(&data.calculat.cart.keyboard, &data.calculat.pol.keyboard);
 }
+
+Orientation getOrientation() {
+    double alon = fabs(data.calculat.pol.screen.lon);
+    return data.calculat.pol.screen.lat > 70 || data.calculat.pol.screen.lat < -70 ? horizontal :
+        alon > 135 ? upward : alon < 45 ? downward :
+        data.calculat.pol.screen.lon < 0 ? rightward : leftward;
+}
+
+Formfactor getFormfactor() {
+    double alon = fabs(data.calculat.pol.screen.lon);
+    double relativeTilt = (atan2(data.calculat.cart.screen.z, data.calculat.cart.screen.x) -
+            atan2(data.calculat.cart.keyboard.z, data.calculat.cart.keyboard.x)) * 180.0 / PI;
+    if (relativeTilt > 180) relativeTilt -= 360;
+    if (relativeTilt < -180) relativeTilt += 360;
+    return alon > 80 && alon < 100 ? undefinedFF :
+        relativeTilt > -170 && relativeTilt < -10 ? laptop :
+        relativeTilt > 10 || relativeTilt <= -170 ? tablet : borderFF;
+}
+
+Orientation lastOrient = horizontal;
+Formfactor lastFF = undefinedFF;
 
 int main(int argc, char *argv[]) {
     if (argc > 1 && !strcmp("-q", argv[1])) doRporting = 0;
@@ -262,20 +261,11 @@ int main(int argc, char *argv[]) {
         calculateAverage();
         rotate_keyboard_with_90_deg_over_z();
         convertToPolar();
-        double alon = fabs(data.calculat.pol.ecran.lon);
-        Orientation poz = data.calculat.pol.ecran.lat > 70 || data.calculat.pol.ecran.lat < -70 ? horizontal :
-            alon > 135 ? upward : alon < 45 ? downward :
-            data.calculat.pol.ecran.lon < 0 ? rightward : leftward;
-        double relativeTilt = (atan2(data.calculat.cart.ecran.z, data.calculat.cart.ecran.x) -
-            atan2(data.calculat.cart.tastatura.z, data.calculat.cart.tastatura.x)) * 180.0 / PI;
-        if (relativeTilt > 180) relativeTilt -= 360;
-        if (relativeTilt < -180) relativeTilt += 360;
-        Formfactor coinc = alon > 80 && alon < 100 ? undefinedFF :
-            relativeTilt > -170 && relativeTilt < -10 ? laptop :
-            relativeTilt > 10 || relativeTilt <= -170 ? tablet : borderFF;
+        Orientation newOrient = getOrientation();
+        Formfactor newFF = getFormfactor();
         if (doRporting) {
             char const *cpoz = "";
-            switch (poz) {
+            switch (newOrient) {
             case horizontal: cpoz = "horiz"; break;
             case upward: cpoz = "upward"; break;
             case downward: cpoz = "downward"; break;
@@ -284,15 +274,21 @@ int main(int argc, char *argv[]) {
             }
             char const *ccoinc[] = {"lap", "tab", "undef", "bor"};
             printf("%10.0f%8.2f%8.2f%10s%10.0f%8.2f%8.2f%6s\n",
-                data.calculat.pol.ecran.alt,
-                data.calculat.pol.ecran.lat,
-                data.calculat.pol.ecran.lon,
-                cpoz[poz],
-                data.calculat.pol.tastatura.alt,
-                data.calculat.pol.tastatura.lat,
-                data.calculat.pol.tastatura.lon,
-                ccoinc[coinc]);
+                data.calculat.pol.screen.alt,
+                data.calculat.pol.screen.lat,
+                data.calculat.pol.screen.lon,
+                cpoz,
+                data.calculat.pol.keyboard.alt,
+                data.calculat.pol.keyboard.lat,
+                data.calculat.pol.keyboard.lon,
+                ccoinc[newFF]);
         }
-        rotateScreen(poz, coinc);
+        Display *disp = XOpenDisplay(NULL);
+        if (!disp) continue;
+        if (newOrient != horizontal && newOrient != lastOrient)
+            rotateScreen(disp, lastOrient = newOrient);
+        if (newFF != undefinedFF && newFF != borderFF && newFF != lastFF)
+            activateKeyboard(disp, laptop == (lastFF = newFF));
+        XCloseDisplay(disp);
     }
 }
