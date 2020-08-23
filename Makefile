@@ -1,5 +1,5 @@
 LDFLAGS=-lX11 -lXrandr -lm -lXi
-CFLAGS=-O0 -ggdb
+CFLAGS=-Os
 
 PROJECTS=autorotate
 
