@@ -12,6 +12,14 @@ This works atleast on :
 
 We write it in C so it will be very efficent because it runs once a second all the time.
 
+
+There are two applications :
+
+  * autorotate - will do autorotate and determine the laptop/tablet switch.
+
+  * ltSwitch - will just do laptop/tablet switch.
+
+
 # Install
 
 You have to have the xrandr and xinput2 extensions to X11

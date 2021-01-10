@@ -1,7 +1,7 @@
 LDFLAGS=-lX11 -lXrandr -lm -lXi
 CFLAGS=-Os
 
-PROJECTS=autorotate
+PROJECTS=autorotate ltSwitch
 
 all:$(PROJECTS)
 clean:
